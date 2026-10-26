@@ -1,0 +1,4 @@
+"""Shared constants."""
+
+DEFAULT_CHUNK_SIZE = 10_000
+DEFAULT_CHECKSUM_ALGORITHM = "sha256"

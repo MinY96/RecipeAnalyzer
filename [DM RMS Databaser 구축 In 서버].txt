@@ -1,0 +1,87 @@
+[DM RMS Databaser 구축 In 서버]
+
+1. 서버 내 postgresql 상태 확인
+sudo systemctl status postgresql
+
+2. psql 실행
+sudo -u postgres psql
+-> postgresq=# 뜨면 정상 작동
+
+3. 사용자 추가
+CREATE ROLE dm_admin WITH LOGIN;
+CREATE ROLE dm_f1_admin WITH LOGIN;
+CREATE ROLE dm_f2_admin WITH LOGIN;
+CREATE ROLE dm_f1_user WITH LOGIN;
+CREATE ROLE dm_f2_user WITH LOGIN;
+
+4. 사용자 별 패스워드 설정
+- dm_admin: dmadmin
+- dm_f1_admin: f1admin
+- dm_f1_user: f1user
+- dm_f2_admin: f2admin
+- dm_f2_user: f2user
+
+## \password '사용자' 입력 후 새 암호 입력(2번 해야 함)
+\dm_admin
+
+## 사용자 생성 결과 확인
+\du
+
+5. Database 및 Schema 생성
+5-1 dm_rms 데이터베이스 생성
+- dm_admin 을 데이터베이스 소유자로 설정
+CREATE DATABASE dm_rms WITH OWNER = dm_admin ENCODING = 'UTF8';
+
+5.2 불필요한 다른 사용자들의 데이터베이스 연결 제한
+REVOKE ALL ON DATABASE dm_rms FROM PUBLIC;
+GRANT CONNECT ON DATABASE dm_rms TO dm_f1_admin, dm_f1_user, dm_f2_admin, dm_f2_user;
+
+5.3 dm_rms 데이터베이스로 이동
+\c dm_rms
+→ 이동 시 프롬프트가 dm_rms=# 으로 변경
+
+5.4 f1, f2 스키마 생성
+CREATE SCHEMA f1 AUTHORIZATION dm_admin;
+CREATE SCHEMA f2 AUTHORIZATION dm_admin;
+→ 스키마 생성 결과 확인: \dn+
+
+6. 스키마별 접근 권한 설정
+6.1 스키마 USAGE 권환 부여(dm_admin은 소유자이므로 별도로 지정할 필요 x)
+-- F1 사용자
+GRANT USAGE ON SCHEMA f1 TO dm_f1_admin, dm_f1_user;
+-- F2 사용자
+GRANT USAGE ON SCHEMA f2 TO dm_f2_admin, dm_f2_user;
+
+6.2 테이블에 CRUD / Read 권한 부여
+-- dm_f1_admin: CRUD
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA f1 TO dm_f1_admin;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA f1 TO dm_f1_admin;
+-- dm_f1_user: Read only
+GRANT SELECT ON ALL TABLES IN SCHEMA f1 TO dm_f1_user;
+-- dm_f2_admin: CRUD
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA f2 TO dm_f2_admin;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA f2 TO dm_f2_admin;
+-- dm_f2_user: Read only
+GRANT SELECT ON ALL TABLES IN SCHEMA f2 TO dm_f2_user;
+
+7. 앞으로 생성되는 모든 테이블에 자동 권한 적용
+-- F1 SCHEMA
+ALTER DEFAULT PRIVILEGES FOR ROLE dm_admin IN SCHEMA f1 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dm_f1_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE dm_admin IN SCHEMA f1 GRANT SELECT ON TABLES TO dm_f1_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE dm_admin IN SCHEMA f1 GRANT USAGE ON SEQUENCES TO dm_f1_admin;
+
+-- F2 SCHEMA
+ALTER DEFAULT PRIVILEGES FOR ROLE dm_admin IN SCHEMA f2 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dm_f2_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE dm_admin IN SCHEMA f2 GRANT SELECT ON TABLES TO dm_f2_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE dm_admin IN SCHEMA f2 GRANT USAGE ON SEQUENCES TO dm_f2_admin;
+
+설정 확인: \ddp
+
+8. 사용자별 기본 스키마 설정
+- 해당 설정을 하면 매번 f1.dm_recipe_info라고 명시하지 않아도 됨
+-- F1
+ALTER ROLE dm_f1_admin IN DATABASE dm_rms SET search_path = f1, pg_catalog;
+ALTER ROLE dm_f1_user IN DATABASE dm_rms SET search_path = f1, pg_catalog;
+-- F1
+ALTER ROLE dm_f2_admin IN DATABASE dm_rms SET search_path = f2, pg_catalog;
+ALTER ROLE dm_f2_admin IN DATABASE dm_rms SET search_path = f2, pg_catalog;

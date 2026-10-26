@@ -1,0 +1,9 @@
+[project]
+name = "equipment-data-collector"
+version = "0.1.0"
+description = "Multi-equipment data collection project template"
+requires-python = ">=3.12.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

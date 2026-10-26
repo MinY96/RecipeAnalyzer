@@ -1,0 +1,96 @@
+equipments:
+  - equipment_name: SMDI01
+    equipment_model: KLA2139
+    fab: FAB1
+    area: DM
+    enabled: false
+    img_save_mode: false
+    connection:
+      type: ftp
+      encoding: cp949
+      port: 21
+      host_env: SMDI01_FTP_HOST
+      username_env: SMDI01_FTP_USERNAME
+      password_env: SMDI01_FTP_PASSWORD
+      remote_directory: d:/KT0931/Usr/ins8
+      timeout_seconds: 30
+
+  - equipment_name: SMDI02
+    equipment_model: KLA2139
+    fab: FAB1
+    area: DM
+    enabled: true
+    img_save_mode: false
+    connection:
+      type: ftp
+      encoding: cp949
+      port: 21
+      host_env: SMDI02_FTP_HOST
+      username_env: SMDI02_FTP_USERNAME
+      password_env: SMDI02_FTP_PASSWORD
+      remote_directory: d:/Kt0933/Usr/Ins8
+      timeout_seconds: 30
+
+  - equipment_name: SMDI03
+    equipment_model: KLA2139
+    fab: FAB1
+    area: DM
+    enabled: true
+    img_save_mode: false
+    connection:
+      type: ftp
+      encoding: cp949
+      port: 21
+      host_env: SMDI03_FTP_HOST
+      username_env: SMDI03_FTP_USERNAME
+      password_env: SMDI03_FTP_PASSWORD
+      remote_directory: d:/KT0947/Usr/Ins8
+      timeout_seconds: 30
+
+  - equipment_name: SMDI06
+    equipment_model: KLA2139
+    fab: FAB1
+    area: DM
+    enabled: true
+    img_save_mode: false
+    connection:
+      type: ftp
+      encoding: cp949
+      port: 21
+      host_env: SMDI06_FTP_HOST
+      username_env: SMDI06_FTP_USERNAME
+      password_env: SMDI06_FTP_PASSWORD
+      remote_directory: d:/KT1025/Usr/Ins8
+      timeout_seconds: 30
+
+  - equipment_name: SMDI08
+    equipment_model: KLA2365
+    fab: FAB1
+    area: DM
+    enabled: true
+    img_save_mode: false
+    connection:
+      type: ftp
+      encoding: cp949
+      port: 21
+      host_env: SMDI08_FTP_HOST
+      username_env: SMDI08_FTP_USERNAME
+      password_env: SMDI08_FTP_PASSWORD
+      remote_directory: e:/Data101/KTInsptr3333/Usr/Recipes200
+      timeout_seconds: 30
+
+  - equipment_name: SMPW06
+    equipment_model: PUMA
+    fab: FAB1
+    area: DM
+    enabled: true
+    img_save_mode: false
+    connection:
+      type: ftp
+      encoding: cp949
+      port: 21
+      host_env: SMPW06_FTP_HOST
+      username_env: SMPW06_FTP_USERNAME
+      password_env: SMPW06_FTP_PASSWORD
+      remote_directory: e:/DATA91/KTInsptr1141008/Usr/Recipes200
+      timeout_seconds: 30
