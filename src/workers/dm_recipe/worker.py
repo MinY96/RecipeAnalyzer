@@ -3,16 +3,9 @@
 
 from __future__ import annotations
 
-import shutil
-from typing import Any, Dict, List, Tuple
-from datetime import datetime
 from pathlib import Path
-import json
-from itertools import groupby
-from collections import defaultdict
 
 import pandas as pd
-from tqdm import tqdm
 
 from src.domain.entities.equipment import create_equipment, Equipment
 from src.databases import PostgresCRUD

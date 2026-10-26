@@ -19,7 +19,7 @@ equipments:
     equipment_model: KLA2139
     fab: FAB1
     area: DM
-    enabled: true
+    enabled: false
     img_save_mode: false
     connection:
       type: ftp
@@ -51,7 +51,7 @@ equipments:
     equipment_model: KLA2139
     fab: FAB1
     area: DM
-    enabled: true
+    enabled: false
     img_save_mode: false
     connection:
       type: ftp
