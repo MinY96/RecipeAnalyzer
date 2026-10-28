@@ -1,7 +1,7 @@
 [project]
-name = "equipment-data-collector"
-version = "0.1.0"
-description = "Multi-equipment data collection project template"
+name = "recipe-analyzer"
+version = "0.2.0"
+description = "Fault-tolerant DM recipe FTP collector and parser"
 requires-python = ">=3.12.10"
 
 [tool.pytest.ini_options]

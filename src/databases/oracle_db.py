@@ -1,237 +1,181 @@
-"""Oracle 11g database helper, SELECT only. Requires python-oracledb Thick mode.
-
-All SQL text is trusted application SQL. Data values are always bound.
-Use an Oracle account restricted to SELECT privileges for enforceable read-only access.
-"""
+"""Oracle 11g read-only interface, Thin disabled/Thick required by existing deployment."""
 
 from __future__ import annotations
-
 from contextlib import contextmanager
-from pathlib import Path
 from threading import Lock
-from typing import Any, Iterator, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Mapping, Sequence
 import re
-
 import oracledb
 import pandas as pd
+from src.config import config
 
-from src.config.config import (
-    ORACLE_CLIENT_DIR,
-    ORACLE_CONNECT_TIMEOUT,
-    ORACLE_USER,
-    ORACLE_PASSWORD,
-    ORACLE_DSN,
-    ORACLE_POOL_MAX_SIZE,
-    ORACLE_POOL_MIN_SIZE,
-    ORACLE_POOL_INCREMENT,
-)
-
-Params = Mapping[str, Any] | Sequence[Any] | None
-_pool: oracledb.ConnectionPool | None = None
-_pool_lock = Lock()
-_identifier_pattern = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
+_pool = None
+_lock = Lock()
 
 
-def _get_pool() -> oracledb.ConnectionPool:
+def _get_pool():
+    """Oracle Thick 모드를 초기화하고 재사용 가능한 연결 풀을 생성한다."""
     global _pool
     if _pool is None:
-        with _pool_lock:
+        with _lock:
             if _pool is None:
-                lib_dir = ORACLE_CLIENT_DIR
+                lib_dir = config.ORACLE_CLIENT_DIR
                 if lib_dir and not Path(lib_dir).is_dir():
                     raise FileNotFoundError(
-                        f"Oracle Client directory not found: {lib_dir}"
+                        f"Oracle Client directory missing: {lib_dir}"
                     )
-                # Thick mode must be initialized BEFORE the first Oracle connection.
-                if not oracledb.is_thin_mode():
-                    pass  # Another module has already initialized Thick mode.
-                else:
+                if oracledb.is_thin_mode():
                     oracledb.init_oracle_client(
                         **({"lib_dir": lib_dir} if lib_dir else {})
                     )
                 _pool = oracledb.create_pool(
-                    user=ORACLE_USER,
-                    password=ORACLE_PASSWORD,
-                    dsn=ORACLE_DSN,
-                    min=ORACLE_POOL_MIN_SIZE,
-                    max=ORACLE_POOL_MAX_SIZE,
-                    increment=ORACLE_POOL_INCREMENT,
+                    user=config.ORACLE_USER,
+                    password=config.ORACLE_PASSWORD,
+                    dsn=config.ORACLE_DSN,
+                    min=config.ORACLE_POOL_MIN_SIZE,
+                    max=config.ORACLE_POOL_MAX_SIZE,
+                    increment=config.ORACLE_POOL_INCREMENT,
                     getmode=oracledb.POOL_GETMODE_WAIT,
-                    tcp_connect_timeout=ORACLE_CONNECT_TIMEOUT,
+                    tcp_connect_timeout=config.ORACLE_CONNECT_TIMEOUT,
                 )
     return _pool
 
 
 @contextmanager
-def cursor_scope() -> Iterator[Any]:
-    with _get_pool().acquire() as connection:
-        with connection.cursor() as cursor:
+def cursor_scope():
+    """Oracle 커서를 연결 풀에서 임대하고 작업 종료 시 자동으로 반환한다."""
+    with _get_pool().acquire() as conn:
+        with conn.cursor() as cursor:
             yield cursor
 
 
-def close_pool() -> None:
+def close_pool():
+    """공유 Oracle 연결 풀을 종료하고 초기화한다."""
     global _pool
-    with _pool_lock:
+    with _lock:
         if _pool is not None:
             _pool.close(force=True)
             _pool = None
 
 
-def _select_sql(query: str) -> str:
-    if not isinstance(query, str) or not query.strip():
-        raise ValueError("query must be a non-empty SELECT SQL string")
-    query = query.strip()
-    if query.endswith(";"):
-        query = query[:-1].rstrip()
-    if not re.match(r"^(?:SELECT|WITH)\b", query, re.IGNORECASE):
-        raise ValueError(
-            "Only SELECT/WITH queries are accepted (not a security boundary)"
-        )
-    return query
+def _select_sql(query: str):
+    """SQL이 SELECT/WITH 조회문인지 기본 형식을 검증한다.
 
-
-def _condition_rows(
-    conditions: list[dict[str, Any]],
-) -> tuple[list[str], list[tuple[Any, ...]]]:
-    if not isinstance(conditions, list):
-        raise TypeError("conditions must be list[dict]")
-    if not conditions:
-        return [], []
-    if not isinstance(conditions[0], dict) or not conditions[0]:
-        raise ValueError("conditions must contain non-empty dictionaries")
-    keys = list(conditions[0])
-    if any(
-        not isinstance(k, str) or not _identifier_pattern.fullmatch(k) for k in keys
-    ):
-        raise ValueError(
-            "Oracle condition columns must be simple, unquoted SQL identifiers"
-        )
-    if len({k.upper() for k in keys}) != len(keys):
-        raise ValueError("Oracle condition columns must be unique ignoring case")
-    result = []
-    seen = set()
-    for condition in conditions:
-        if not isinstance(condition, dict) or set(condition) != set(keys):
-            raise ValueError("Every condition must contain exactly the same keys")
-        values = tuple(condition[k] for k in keys)
-        try:
-            if values in seen:
-                continue
-            seen.add(values)
-        except TypeError as exc:
-            raise TypeError("Condition values must be hashable scalar values") from exc
-        result.append(values)
-    return keys, result
+    Args:
+        query: 실행할 SQL 조회문."""
+    if not re.match(r"^\s*(SELECT|WITH)\b", query, re.I):
+        raise ValueError("SELECT only")
+    return query.strip().rstrip(";")
 
 
 class OracleCRUD:
-    """Oracle SELECT operations returning pandas DataFrames, lists, dicts, or scalars."""
-
     @staticmethod
     def select_query(
-        query: str,
-        params: Params = None,
-        *,
-        arraysize: int = 1000,
-        prefetchrows: int = 1000,
-    ) -> pd.DataFrame:
-        sql = _select_sql(query)
-        with cursor_scope() as cursor:
-            cursor.arraysize = arraysize
-            cursor.prefetchrows = prefetchrows
-            cursor.execute(sql, params)
-            columns = [desc[0].lower() for desc in cursor.description]
-            rows = cursor.fetchall()
-        return pd.DataFrame.from_records(rows, columns=columns)
+        query: str, params=None, *, arraysize: int = 1000, prefetchrows: int = 1000
+    ):
+        """Oracle SELECT 결과를 DataFrame으로 조회한다.
+
+        Args:
+            query: 실행할 SQL 조회문.
+            params: SQL 바인드 값 또는 Parameter 딕셔너리.
+            arraysize: 처리에 필요한 입력값.
+            prefetchrows: 처리에 필요한 입력값."""
+        with cursor_scope() as cur:
+            cur.arraysize = arraysize
+            cur.prefetchrows = prefetchrows
+            cur.execute(_select_sql(query), params)
+            return pd.DataFrame.from_records(
+                cur.fetchall(), columns=[d[0].lower() for d in cur.description]
+            )
 
     @staticmethod
     def select_query_by_list(
-        query: str,
-        params: Params = None,
-        *,
-        null_value: Any = "NULL",
-        arraysize: int = 1000,
-    ) -> list[Any]:
-        sql = _select_sql(query)
-        with cursor_scope() as cursor:
-            cursor.arraysize = arraysize
-            cursor.execute(sql, params)
-            return [row[0] if row[0] is not None else null_value for row in cursor]
+        query: str, params=None, *, null_value: Any = "NULL", arraysize: int = 1000
+    ):
+        """Oracle SELECT의 첫 열을 리스트로 조회한다.
+
+        Args:
+            query: 실행할 SQL 조회문.
+            params: SQL 바인드 값 또는 Parameter 딕셔너리.
+            null_value: 처리에 필요한 입력값.
+            arraysize: 처리에 필요한 입력값."""
+        with cursor_scope() as cur:
+            cur.arraysize = arraysize
+            cur.execute(_select_sql(query), params)
+            return [r[0] if r[0] is not None else null_value for r in cur]
 
     @staticmethod
-    def select_one(query: str, params: Params = None) -> dict[str, Any] | None:
-        sql = _select_sql(query)
-        with cursor_scope() as cursor:
-            cursor.execute(sql, params)
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            return dict(zip((desc[0].lower() for desc in cursor.description), row))
+    def select_one(query: str, params=None):
+        """Oracle SELECT의 첫 번째 행을 딕셔너리로 조회한다.
+
+        Args:
+            query: 실행할 SQL 조회문.
+            params: SQL 바인드 값 또는 Parameter 딕셔너리."""
+        df = OracleCRUD.select_query(query, params)
+        return None if df.empty else df.iloc[0].to_dict()
 
     @staticmethod
-    def select_scalar(query: str, params: Params = None, *, default: Any = None) -> Any:
-        sql = _select_sql(query)
-        with cursor_scope() as cursor:
-            cursor.execute(sql, params)
-            row = cursor.fetchone()
-            return row[0] if row is not None else default
+    def select_scalar(query: str, params=None, *, default=None):
+        """Oracle SELECT의 첫 번째 단일 값을 조회한다.
+
+        Args:
+            query: 실행할 SQL 조회문.
+            params: SQL 바인드 값 또는 Parameter 딕셔너리.
+            default: 조건에 맞는 값이 없을 때 사용할 기본값."""
+        with cursor_scope() as cur:
+            cur.execute(_select_sql(query), params)
+            row = cur.fetchone()
+            return row[0] if row else default
 
     @staticmethod
     def select_query_by_conditions(
         query: str,
-        conditions: list[dict[str, Any]],
+        conditions: list[dict],
         *,
-        params: Mapping[str, Any] | None = None,
+        params: Mapping | None = None,
         batch_size: int = 150,
-    ) -> pd.DataFrame:
-        """Fetch base-query rows matching ANY supplied dict (AND inside each dict).
+    ):
+        """공통 키를 가진 여러 조건을 OR로 묶어 Oracle에서 배치 조회한다.
 
-        Each dict uses the same keys. Duplicate condition dicts are ignored.
-        NULL conditions match database NULL via IS NULL.
-        Large condition lists are processed in independent bounded SELECT batches.
-
-        `query` must project all filter columns using ordinary, unquoted Oracle names.
-        `params` holds named bind variables already present in `query`.
-        """
-        base_query = _select_sql(query)
-        if not isinstance(batch_size, int) or batch_size < 1:
-            raise ValueError("batch_size must be a positive integer")
-        columns, rows = _condition_rows(conditions)
-        if not rows:
+        Args:
+            query: 실행할 SQL 조회문.
+            conditions: 공통 키를 가진 조회 조건 딕셔너리 목록.
+            params: SQL 바인드 값 또는 Parameter 딕셔너리.
+            batch_size: 배치 단위 처리 건수."""
+        if not conditions:
             return pd.DataFrame()
-        if params is not None and not isinstance(params, Mapping):
-            raise TypeError("params must be a named-bind dictionary")
-        base_params = dict(params or {})
-        all_rows: list[tuple[Any, ...]] = []
-        result_columns: list[str] | None = None
-
+        cols = list(conditions[0])
+        if not cols or any(set(item) != set(cols) for item in conditions):
+            raise ValueError("Inconsistent condition dictionaries")
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_$#]*", col) for col in cols):
+            raise ValueError("Invalid condition column")
+        rows = list(dict.fromkeys(tuple(item[c] for c in cols) for item in conditions))
+        found = []
+        result_cols = None
         for start in range(0, len(rows), batch_size):
-            batch = rows[start : start + batch_size]
-            disjunction: list[str] = []
-            bind_params = dict(base_params)
-            for i, values in enumerate(batch):
-                conjunction: list[str] = []
-                for j, (key, value) in enumerate(zip(columns, values)):
+            chunk = rows[start : start + batch_size]
+            predicates = []
+            bindings = dict(params or {})
+            for i, values in enumerate(chunk):
+                conjuncts = []
+                for j, (col, value) in enumerate(zip(cols, values)):
                     if value is None:
-                        conjunction.append(f"src.{key} IS NULL")
+                        conjuncts.append(f"src.{col} IS NULL")
                     else:
-                        bind_key = f"cnd_{i}_{j}"
-                        if bind_key in bind_params:
-                            raise ValueError(
-                                f"Reserved bind name collision: {bind_key}"
-                            )
-                        conjunction.append(f"src.{key} = :{bind_key}")
-                        bind_params[bind_key] = value
-                disjunction.append("(" + " AND ".join(conjunction) + ")")
-            sql = (
-                f"SELECT src.* FROM ({base_query}) src WHERE ("
-                + " OR ".join(disjunction)
-                + ")"
+                        key = f"cnd_{i}_{j}"
+                        conjuncts.append(f"src.{col}=:{key}")
+                        bindings[key] = value
+                predicates.append("(" + " AND ".join(conjuncts) + ")")
+            statement = (
+                "SELECT src.* FROM ("
+                + _select_sql(query)
+                + ") src WHERE "
+                + " OR ".join(predicates)
             )
-            with cursor_scope() as cursor:
-                cursor.arraysize = 1000
-                cursor.execute(sql, bind_params)
-                if result_columns is None:
-                    result_columns = [desc[0].lower() for desc in cursor.description]
-                all_rows.extend(cursor.fetchall())
-        return pd.DataFrame.from_records(all_rows, columns=result_columns)
+            with cursor_scope() as cur:
+                cur.execute(statement, bindings)
+                if result_cols is None:
+                    result_cols = [d[0].lower() for d in cur.description]
+                found.extend(cur.fetchall())
+        return pd.DataFrame.from_records(found, columns=result_cols)

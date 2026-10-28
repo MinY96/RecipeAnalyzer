@@ -1,87 +1,58 @@
-# pylint: disable=W0718
-"""PUMA Recipe Parser"""
+"""PUMA XML parser, including single-channel and multi-channel configurations."""
 
+from __future__ import annotations
 from pathlib import Path
-from typing import Dict, Any
-
+from typing import Any
 from src.core.convert import xml_to_dict
 from src.preprocessing.parsers.parser import Parser
 
 
 class PumaParser(Parser):
-    """PUMA Recipe Parser"""
-
-    def parse(self, file_path: Path) -> Dict[str, Any]:
-        """PUMA Recipe 파일 파싱 메소드
+    def parse(self, file_path: Path) -> dict[str, Any]:
+        """PUMA Sensitivity1.xml에서 채널별 광학·검사 Parameter를 추출한다.
 
         Args:
-            file_path (Path): Recipe 파일 경로
+            self: 현재 클래스 인스턴스.
+            file_path: 분석 대상 파일 경로.
 
         Returns:
-            Dict[str, Any]: 파싱 결과
-        """
-        params = {}
-        try:
-            data = xml_to_dict(file_path)
-            # 1. Scan Line / Polarization
-            polar_info = data["RECIPE_COMPONENT_NEW"]["SENSITIVITY_COMPONENT"][
-                "OPTICS"
-            ]["CARRERA_OPTICS"]["CARRERA_INSPECTION_OPTICS"]
-
-            scan_line = polar_info.get("MAGNIFICATION", {"value": None}).get("value")
-
-            polar_left = (
-                polar_info["CARRERA_INCIDENT_OPTICS"]["POLARIZATION"]["value"]
-                .split("-")[0]
-                .upper()
+            dict[str, Any]: 처리 결과를 반환한다."""
+        data = xml_to_dict(file_path)
+        root = data["RECIPE_COMPONENT_NEW"]["SENSITIVITY_COMPONENT"]
+        polar_info = root["OPTICS"]["CARRERA_OPTICS"]["CARRERA_INSPECTION_OPTICS"]
+        scan_line = self.leaf(polar_info.get("MAGNIFICATION"))
+        incident = self.leaf(polar_info["CARRERA_INCIDENT_OPTICS"]["POLARIZATION"])
+        if not incident:
+            raise ValueError("PUMA incident polarization missing")
+        polar_left = str(incident).split("-")[0].upper()
+        params: dict[str, Any] = {}
+        for ch in self.as_list(polar_info["CARRERA_COLLECTION_OPTICS"]):
+            channel = str(self.leaf(ch.get("CHANNEL_NAME"), "")).split(" ")[0]
+            right = str(self.leaf(ch.get("POLARIZATION"), ""))
+            if not channel or not right:
+                raise ValueError("PUMA collection channel/polarization missing")
+            params.update(
+                {
+                    f"polarization_ch{channel}": f"{polar_left}/{right[0]}",
+                    f"scan_line_ch{channel}": scan_line,
+                }
             )
-            for ch_dict in polar_info["CARRERA_COLLECTION_OPTICS"]:
-                ch_name = (
-                    ch_dict.get("CHANNEL_NAME", {"value": ""})
-                    .get("value", None)
-                    .split(" ")[0]
-                )
-                polar_right = ch_dict.get("POLARIZATION", {"value": ""}).get(
-                    "value", ""
-                )[0]
-                polarization = f"{polar_left}/{polar_right}"
-                params.update(
-                    {
-                        f"polarization_ch{ch_name}": polarization,
-                        f"scan_line_ch{ch_name}": scan_line,
-                    }
-                )
-
-            # 2. AIT Parameter
-            ait_info = data["RECIPE_COMPONENT_NEW"]["SENSITIVITY_COMPONENT"][
-                "SENSITIVITY"
-            ]["ALGORITHM_DATA"]["ALGORITHM"]["DarkfieldDetectionParameters"]["HLAT"][
-                "HLATRecipe"
-            ]
-            for ch_dict in ait_info:
-                ch_name = str(
-                    int(ch_dict.get("channelID", {"value": "-1"}).get("value", -1)) + 1
-                )
-                edge_factor = ch_dict.get("EdgeDieFactor", {"value": None}).get("value")
-                p_filter = ch_dict.get("PostFilter", {"value": None}).get("value")
-                details = ch_dict["REGION_PARAM_INFO"]
-                threshold = details.get("Threshold", {"value": None}).get("value")
-                noise = details.get("Noise", {"value": None}).get("value")
-                absmin = details.get("MinDiff", {"value": None}).get("value")
-                gradient = details.get("Gradient", {"value": None}).get("value")
-                color = details.get("Color", {"value": None}).get("value")
-                params.update(
-                    {
-                        f"edge_factor_ch{ch_name}": edge_factor,
-                        f"filter_ch{ch_name}": p_filter,
-                        f"threshold_ch{ch_name}": threshold,
-                        f"noise_ch{ch_name}": noise,
-                        f"absmin_ch{ch_name}": absmin,
-                        f"gradient_ch{ch_name}": gradient,
-                        f"color_ch{ch_name}": color,
-                    }
-                )
-            params = dict(sorted(params.items(), key=lambda x: x[0]))
-        except Exception as e:
-            print(e)
-        return params
+        ait = root["SENSITIVITY"]["ALGORITHM_DATA"]["ALGORITHM"][
+            "DarkfieldDetectionParameters"
+        ]["HLAT"]["HLATRecipe"]
+        for ch in self.as_list(ait):
+            channel = str(int(self.leaf(ch.get("channelID"), -1)) + 1)
+            details = ch["REGION_PARAM_INFO"]
+            keys = {
+                "edge_factor": self.leaf(ch.get("EdgeDieFactor")),
+                "filter": self.leaf(ch.get("PostFilter")),
+                "threshold": self.leaf(details.get("Threshold")),
+                "noise": self.leaf(details.get("Noise")),
+                "absmin": self.leaf(details.get("MinDiff")),
+                "gradient": self.leaf(details.get("Gradient")),
+                "color": self.leaf(details.get("Color")),
+            }
+            params.update({f"{key}_ch{channel}": value for key, value in keys.items()})
+        if not params:
+            raise ValueError(f"No recognized PUMA parameters: {file_path}")
+        return dict(sorted(params.items()))

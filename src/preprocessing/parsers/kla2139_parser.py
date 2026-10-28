@@ -1,139 +1,109 @@
-# pylint: disable=W0718
-"""KLA2139 Recipe Parser"""
+"""KLA2139 ins.dat parser; raises on malformed input rather than swallowing errors."""
 
+from __future__ import annotations
 from pathlib import Path
-from typing import Dict, List, Any
-
+from typing import Any
 from src.core.types import SafeList
 from src.preprocessing.parsers.parser import Parser
 
 
 class KLA2139Parser(Parser):
-    """KLA2139 Recipe Parser"""
-
-    def parse(self, file_path: Path) -> Dict[str, Any]:
-        """KLA2139 Recipe 파일 파싱 메소드
+    def parse(self, file_path: Path) -> dict[str, Any]:
+        """KLA2139 ins.dat의 Optics·Threshold·Focus Parameter를 추출한다.
 
         Args:
-            file_path (Path): Recipe 파일 경로
+            self: 현재 클래스 인스턴스.
+            file_path: 분석 대상 파일 경로.
 
         Returns:
-            Dict[str, Any]: 파싱 결과
-        """
-        params = {
-            "pixel": None,
-            "mode": None,
-            "filter": None,
-            "threshold": None,
-            "edge": None,
-            "focus_offset": None,
-            "th_max_s0": None,
-            "th_max_s1": None,
-            "th_max_s2": None,
-            "th_max_s3": None,
-            "th_offset_s0": None,
-            "th_offset_s1": None,
-            "th_offset_s2": None,
-            "th_offset_s3": None,
-            "th_offset_r0": None,
-            "th_offset_r1": None,
-            "th_offset_r2": None,
-            "th_offset_r3": None,
-        }
-        lines = None
-        encodings = ["utf-8", "cp949", "latin1", "euc-kr"]
-        for enc in encodings:
+            dict[str, Any]: 처리 결과를 반환한다."""
+        data = None
+        # Preserve legacy fallback sequence; latin1 decodes any bytes and is last.
+        for encoding in ("utf-8", "cp949", "euc-kr", "latin1"):
             try:
-                with open(file_path, "r", encoding=enc) as file:
-                    lines = file.readlines()
-                break  # 성공하면 반복문 탈출
-            except UnicodeDecodeError:
-                continue  # 인코딩 에러 시 다음 인코딩 시도
-            except Exception as e:
-                print(f"{file_path.name}: {e}")
+                with file_path.open("r", encoding=encoding) as stream:
+                    data = [line.rstrip("\r\n").split("\t") for line in stream]
                 break
+            except UnicodeDecodeError:
+                continue
+        if data is None or not data:
+            raise ValueError(f"Unparseable or empty KLA2139 file: {file_path}")
+        info = self._analyze_recipe_lines(data)
+        if not info:
+            raise ValueError(f"KLA2139 test[0]. structure missing: {file_path}")
 
-        if lines is not None:
-            lines = [info.rstrip().split("\t") for info in lines]
-        else:
-            print(f"{file_path.name}: 모든 인코딩 시도 실패")
-            lines = []
+        pixel = self._safe_get_first(info, [".lens_desc.", ".pixel_size"])
         try:
-            key_info = self._analyze_recipe_lines(lines)
-            pixel = self._safe_get_first(key_info, [".lens_desc.", ".pixel_size"])
-            try:
-                pixel = format(float(pixel), ".2f").rstrip("0").rstrip(".")
-            except Exception:
-                pixel = None
-            focus = self._safe_get_first(
-                key_info, [".premap_sites.", ".site[0].", ".focus_offset"]
+            pixel = format(float(pixel), ".2f").rstrip("0").rstrip(".")
+        except (ValueError, TypeError):
+            pixel = None
+        focus = self._safe_get_first(
+            info, [".premap_sites.", ".site[0].", ".focus_offset"]
+        )
+        threshold = self._safe_get_first(info, [".sens.", ".ds_thresha"])
+        thresh_mode = self._safe_get_first(info, [".sens.", ".thresh_mode"])
+        mode = {"a": "AUTO", "s": "SAT", "f": "FIXED"}.get(thresh_mode)
+        filter_value = self._safe_get_first(
+            info, [".sens.", ".filter.", ".fdata.", ".name"]
+        )
+        filter_value = filter_value.upper() if filter_value is not None else None
+        th_seg = SafeList(
+            self._numeric_values(
+                self._safe_get(info, [".sens.", ".sat_convolver_bounds"], [])
             )
-            threshold = self._safe_get_first(key_info, [".sens.", ".ds_thresha"])
-            thresh_modes = {"a": "AUTO", "s": "SAT", "f": "FIXED"}
-            temp = self._safe_get_first(key_info, [".sens.", ".thresh_mode"])
-            mode = thresh_modes.get(temp, None)
-            filter_para = self._safe_get_first(
-                key_info, [".sens.", ".filter.", ".fdata.", ".name"]
+        )
+        th_max = SafeList(
+            self._numeric_values(
+                self._safe_get(info, [".sens.", ".sat_threshold_max"], [])
             )
-            filter_para = str.upper(filter_para) if filter_para is not None else None
-            th_seg = SafeList(
-                list(
-                    map(
-                        int,
-                        self._safe_get(
-                            key_info, [".sens.", ".sat_convolver_bounds"], []
-                        )[:4],
-                    )
-                )
+        )
+        th_offset = SafeList(
+            self._numeric_values(
+                self._safe_get(info, [".sens.", ".sat_threshold_offset"], [])
             )
-            th_max = SafeList(
-                list(
-                    map(
-                        int,
-                        self._safe_get(key_info, [".sens.", ".sat_threshold_max"], [])[
-                            :4
-                        ],
-                    )
-                )
-            )
-            th_offset = SafeList(
-                list(
-                    map(
-                        int,
-                        self._safe_get(
-                            key_info, [".sens.", ".sat_threshold_offset"], []
-                        )[:4],
-                    )
-                )
-            )
-            edge_cells = {"0": "Exclude", "5": "Include"}
-            temp = self._safe_get_first(key_info, [".splan.", ".edge_cells"])
-            edge = edge_cells.get(temp, None)
-            params = {
-                "pixel": pixel,
-                "mode": mode,
-                "filter": filter_para,
-                "threshold": threshold,
-                "edge": edge,
-                "focus_offset": focus,
-                "th_max_s0": th_max[0],
-                "th_max_s1": th_max[1],
-                "th_max_s2": th_max[2],
-                "th_max_s3": th_max[3],
-                "th_offset_s0": th_offset[0],
-                "th_offset_s1": th_offset[1],
-                "th_offset_s2": th_offset[2],
-                "th_offset_s3": th_offset[3],
-                "th_offset_r0": th_seg[0],
-                "th_offset_r1": th_seg[1],
-                "th_offset_r2": th_seg[2],
-                "th_offset_r3": th_seg[3],
-            }
-        except Exception as e:
-            print(e)
-        return params
+        )
+        edge = {"0": "Exclude", "5": "Include"}.get(
+            self._safe_get_first(info, [".splan.", ".edge_cells"])
+        )
+        result = {
+            "pixel": pixel,
+            "mode": mode,
+            "filter": filter_value,
+            "threshold": threshold,
+            "edge": edge,
+            "focus_offset": focus,
+        }
+        for i in range(4):
+            result[f"th_max_s{i}"] = th_max[i]
+            result[f"th_offset_s{i}"] = th_offset[i]
+            result[f"th_offset_r{i}"] = th_seg[i]
+        if all(v is None for v in result.values()):
+            raise ValueError(f"No recognized KLA2139 parameters: {file_path}")
+        return result
 
-    def _safe_get(self, d, keys, default=None):
+    @staticmethod
+    def _numeric_values(values: Any) -> list[int]:
+        """텍스트로 기록된 설정값들을 숫자로 변환하여 반환한다.
+
+        Args:
+            values: 처리에 필요한 입력값.
+
+        Returns:
+            list[int]: 처리 결과를 반환한다."""
+        if not isinstance(values, list):
+            return []
+        return [
+            int(v) if v is not None and str(v).strip() else None for v in values[:4]
+        ]
+
+    @staticmethod
+    def _safe_get(d: dict, keys: list[str], default=None):
+        """중첩 딕셔너리의 키 경로를 따라 값을 안전하게 조회한다.
+
+        Args:
+            d: 처리에 필요한 입력값.
+            keys: Recipe 또는 조건의 키 목록.
+            default: 조건에 맞는 값이 없을 때 사용할 기본값."""
         for key in keys:
             if isinstance(d, dict) and key in d:
                 d = d[key]
@@ -141,75 +111,63 @@ class KLA2139Parser(Parser):
                 return default
         return d
 
-    def _safe_get_first(self, d, keys):
-        val = self._safe_get(d, keys, default=[None])
-        if isinstance(val, list) and len(val) > 0:
-            return val[0]
-        return None
-
-    def _analyze_recipe_lines(self, lines: List[str]) -> Dict[int, Any]:
-        """Recipe 파일(리스트 형태) 분석 메소드
+    def _safe_get_first(self, d: dict, keys: list[str]):
+        """중첩 키 조회 결과가 리스트라면 첫 원소를 반환한다.
 
         Args:
-            lines (List[str]): 줄 단위 읽은 Recipe 파일 정보
+            self: 현재 클래스 인스턴스.
+            d: 처리에 필요한 입력값.
+            keys: Recipe 또는 조건의 키 목록."""
+        value = self._safe_get(d, keys, [None])
+        return value[0] if isinstance(value, list) and value else None
+
+    @staticmethod
+    def _check_line_level(line: list[str]) -> int:
+        """탭 분리된 KLA2139 설정행의 계층 레벨을 계산한다.
+
+        Args:
+            line: FTP 또는 Recipe 텍스트 한 행.
 
         Returns:
-            Dict[int, any]: 라인 별 분석 결과
-        """
-        first_key = None
-        second_key = None
-        third_key = None
-        fourth_key = None
-        fifth_key = None
-        key_info = {}
+            int: 처리 결과를 반환한다."""
+        count = 0
+        for token in line:
+            if token:
+                break
+            count += 1
+        return count
+
+    def _analyze_recipe_lines(self, lines: list[list[str]]) -> dict:
+        """KLA2139 설정행을 키별 중첩 자료구조로 변환한다.
+
+        Args:
+            self: 현재 클래스 인스턴스.
+            lines: 처리에 필요한 입력값.
+
+        Returns:
+            dict: 처리 결과를 반환한다."""
+        root: dict = {}
+        path: list[str | None] = [None] * 5
         for line in lines:
             level = self._check_line_level(line)
-            if len(line) > level:
-                key = line[level]
-                try:
-                    value = line[level + 1 :]
-                except Exception:
-                    value = None
-                if level == 0:
-                    first_key = key
-                    key_info[first_key] = {}
-                elif level == 1:
-                    second_key = key
-                    key_info[first_key][second_key] = value
-                elif level == 2:
-                    third_key = key
-                    if not isinstance(key_info[first_key][second_key], dict):
-                        key_info[first_key][second_key] = {}
-                    key_info[first_key][second_key][third_key] = value
-                elif level == 3:
-                    fourth_key = key
-                    if not isinstance(key_info[first_key][second_key][third_key], dict):
-                        key_info[first_key][second_key][third_key] = {}
-                    key_info[first_key][second_key][third_key][fourth_key] = value
-                elif level == 4:
-                    fifth_key = key
-                    if not isinstance(
-                        key_info[first_key][second_key][third_key][fourth_key], dict
-                    ):
-                        key_info[first_key][second_key][third_key][fourth_key] = {}
-                    key_info[first_key][second_key][third_key][fourth_key][
-                        fifth_key
-                    ] = value
-        return key_info.get("test[0].", {})
-
-    def _check_line_level(self, line: str) -> int:
-        """Recipe 한 줄마다 레벨 체크
-
-        Args:
-            line (str): Recipe 파일의 특정 한 줄
-
-        Returns:
-            int: 레벨
-        """
-        cnt = 0
-        for check in [item == "" for item in line]:
-            if check:
-                cnt += 1
-            else:
-                break
-        return cnt
+            if level >= 5 or len(line) <= level:
+                continue
+            key = line[level]
+            path[level] = key
+            for depth in range(level + 1, 5):
+                path[depth] = None
+            if level == 0:
+                root[key] = {}
+                continue
+            if path[0] is None:
+                raise ValueError("KLA2139 hierarchy missing root")
+            current = root[path[0]]
+            for depth in range(1, level):
+                parent = path[depth]
+                if parent is None:
+                    raise ValueError("KLA2139 hierarchy missing parent")
+                if not isinstance(current.get(parent), dict):
+                    current[parent] = {}
+                current = current[parent]
+            current[key] = line[level + 1 :]
+        return root.get("test[0].", {})

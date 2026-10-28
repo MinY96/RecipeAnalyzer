@@ -1,12 +1,12 @@
-"""장비 모듈"""
+"""Immutable equipment and FTP configuration."""
 
+from __future__ import annotations
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
 class FTPConnectionInfo:
-    """FTP 접속 정보 클래스"""
-
     host: str
     username: str
     password: str
@@ -18,8 +18,6 @@ class FTPConnectionInfo:
 
 @dataclass(frozen=True, slots=True)
 class Equipment:
-    """장비 정보 클래스"""
-
     name: str
     fab: str
     area: str
@@ -29,30 +27,29 @@ class Equipment:
     img_save_mode: bool = False
 
 
-def create_equipment(eq_info: dict[str, str]) -> Equipment:
-    """장비 클래스 생성 메소드
+def create_equipment(eq_info: dict[str, Any]) -> Equipment:
+    """장비 설정 딕셔너리로부터 FTP 접속 정보와 Equipment 객체를 생성한다.
 
     Args:
-        eq_info (dict[str,str]): 장비 정보
+        eq_info: 처리에 필요한 입력값.
 
     Returns:
-        Equipment: 파싱된 장비 인스턴스
-    """
-    fdc_connection = FTPConnectionInfo(
-        host=eq_info["connection"]["host"],
-        username=eq_info["connection"]["username"],
-        password=eq_info["connection"]["password"],
-        port=eq_info["connection"]["port"],
-        encoding=eq_info["connection"]["encoding"],
-        timeout_seconds=eq_info["connection"]["timeout_seconds"],
-        remote_directory=eq_info["connection"]["remote_directory"],
-    )
+        Equipment: 처리 결과를 반환한다."""
+    connection = eq_info["connection"]
     return Equipment(
         name=eq_info["equipment_name"],
         model=eq_info["equipment_model"],
         fab=eq_info["fab"],
         area=eq_info["area"],
-        ftp_info=fdc_connection,
-        enabled=bool(eq_info["enabled"]),
-        img_save_mode=bool(eq_info["img_save_mode"]),
+        ftp_info=FTPConnectionInfo(
+            host=connection["host"],
+            username=connection["username"],
+            password=connection["password"],
+            port=int(connection["port"]),
+            encoding=connection["encoding"],
+            timeout_seconds=int(connection["timeout_seconds"]),
+            remote_directory=connection["remote_directory"],
+        ),
+        enabled=bool(eq_info.get("enabled", True)),
+        img_save_mode=bool(eq_info.get("img_save_mode", False)),
     )

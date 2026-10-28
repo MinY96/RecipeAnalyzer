@@ -1,33 +1,29 @@
-"""측정 장비 데이터 수집"""
-
-from __future__ import annotations
+"""DM RecipeAnalyzer factories."""
 
 from pathlib import Path
-
-from .config.config import load_equipment_config, DATA_BASE_DIR
+from .config.config import DATA_BASE_DIR, load_equipment_config
 from .collectors.ftp.collector import Collector
 from .workers.dm_recipe.worker import RecipeParser
 
-DATA_BASE_DIR.mkdir(parents=True, exist_ok=True)
 
-EQUIPMENTS = load_equipment_config(Path("src/config/equipments.yaml"))
+def _equipments():
+    """YAML에 등록된 장비 정보를 불러와 수집·파싱기에 전달한다."""
+    return load_equipment_config(Path(__file__).parent / "config" / "equipments.yaml")
 
 
 def create_collector() -> Collector:
-    """측정 장비 데이터 수집기 등록
+    """장비 설정과 백업 기준 경로로 FTP 수집기 인스턴스를 생성한다.
 
     Returns:
-        Collector: 데이터 수집 클래스
-    """
-
-    return Collector(equipments=EQUIPMENTS, dm_dir=DATA_BASE_DIR)
+        Collector: 처리 결과를 반환한다."""
+    DATA_BASE_DIR.mkdir(parents=True, exist_ok=True)
+    return Collector(equipments=_equipments(), dm_dir=DATA_BASE_DIR)
 
 
 def create_recipe_parser() -> RecipeParser:
-    """msr 파일 큐 처리기 등록
+    """장비 설정과 백업 경로로 Recipe 파싱 작업기를 생성한다.
 
     Returns:
-        QueueWorker: msr 파일 파싱 및 idb 조인 처리기
-    """
-
-    return RecipeParser(equipments=EQUIPMENTS, dm_dir=DATA_BASE_DIR)
+        RecipeParser: 처리 결과를 반환한다."""
+    DATA_BASE_DIR.mkdir(parents=True, exist_ok=True)
+    return RecipeParser(equipments=_equipments(), dm_dir=DATA_BASE_DIR)
