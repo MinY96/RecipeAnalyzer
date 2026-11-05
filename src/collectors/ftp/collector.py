@@ -207,34 +207,49 @@ def join_mes_info(upserts: list[dict[str, Any]]) -> pd.DataFrame:
         chunk = devices[offset : offset + 900]
         binds = {f"d{i}": device for i, device in enumerate(chunk)}
         holders = ",".join(f":d{i}" for i in range(len(chunk)))
-        query = f"""SELECT DISTINCT MAT_ID product, MAT_CMF_21 device,
-                    MAT_CMF_5 device_name, MAT_CMF_6 tech_prod,
-                    MAT_CMF_7 tech, MAT_CMF_23 prod_group
-                    FROM IDBMGR.MWIPMATDEF WHERE FACTORY='AFB1'
-                      AND MAT_CMF_21 IN ({holders})"""
+        query = f"""
+        SELECT DISTINCT MAT_ID product, MAT_CMF_21 device,
+                MAT_CMF_5 device_name, MAT_CMF_6 tech_prod,
+                MAT_CMF_7 tech, MAT_CMF_23 prod_group,
+                CREATE_TIME create_time
+        FROM IDBMGR.MWIPMATDEF 
+        WHERE FACTORY='AFB1'
+            AND MAT_CMF_21 IN ({holders})"""
         mes = OracleCRUD.select_query(query, binds)
-        for row in mes.itertuples(index=False):
-            product = getattr(row, "product", None)
-            device = str(getattr(row, "device", ""))
-            device_name = getattr(row, "device_name", None)
+        for device, candidates in mes.groupby("device"):
+            candidate = candidates.loc[candidates["create_time"].idxmax()]
+            product = getattr(candidate, "product", None)
+            device = str(getattr(candidate, "device", ""))
+            device_name = getattr(candidate, "device_name", None)
             if device not in matches:
                 continue
             if device_name not in (None, "", " ") and (
                 not product or device not in str(product)
             ):
                 continue
-            matches[device].add(
-                (
-                    getattr(row, "tech_prod", None),
-                    getattr(row, "tech", None),
-                    getattr(row, "prod_group", None),
+            tech_prod = getattr(candidate, "tech_prod", None)
+            tech = getattr(candidate, "tech", None)
+            prod_group = getattr(candidate, "prod_group", None)
+            if all(
+                v is not None and v.strip() != "" for v in (tech_prod, tech, prod_group)
+            ):
+                matches[device].add(
+                    (
+                        getattr(candidate, "tech_prod", None),
+                        getattr(candidate, "tech", None),
+                        getattr(candidate, "prod_group", None),
+                    )
                 )
-            )
+    matches = {
+        device: masters for device, masters in matches.items() if len(masters) > 0
+    }
     # Do not arbitrary-drop conflicting master metadata. Keep null & log conflict.
     for name, index in (("tech_prod", 0), ("tech", 1), ("prod_group", 2)):
         frame[name] = frame["device"].map(
             lambda dev: (
-                next(iter(matches[dev]))[index] if len(matches[dev]) == 1 else None
+                next(iter(matches[dev]))[index]
+                if (dev in matches) and (len(matches[dev]) == 1)
+                else None
             )
         )
     for device, variants in matches.items():

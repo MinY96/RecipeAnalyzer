@@ -15,6 +15,18 @@ def xml_to_dict(xml_source: str | Path, from_file: bool = True) -> dict:
     Returns:
         dict: 처리 결과를 반환한다."""
     root = ET.parse(xml_source).getroot() if from_file else ET.fromstring(xml_source)
+    # if from_file:
+    #     # 1. 파일에서 읽을 때: utf-8-sig로 열고 공백을 제거한 문자열로 파싱합니다.
+    #     with open(xml_source, "r", encoding="utf-8-sig") as f:
+    #         xml_content = f.read().strip()
+    #     root = ET.fromstring(xml_content)
+    # else:
+    #     # 2. 이미 문자열이나 바이트 상태일 때: 인코딩 및 공백 문제를 처리합니다.
+    #     if isinstance(xml_source, bytes):
+    #         xml_str = xml_source.decode("utf-8-sig").strip()
+    #     else:
+    #         xml_str = xml_source.strip()
+    #     root = ET.fromstring(xml_str)
 
     def get_tag_name(tag: str) -> str:
         """XML 네임스페이스를 제거하고 실제 태그 이름을 반환한다.

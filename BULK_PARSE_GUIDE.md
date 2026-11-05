@@ -34,6 +34,7 @@ python parse_all_recipes.py --active-only
 # 특정 장비의 재처리 대상을 100건씩 저장
 python parse_all_recipes.py --equip SMDI08 --batch-size 100
 python parse_all_recipes.py --batch-size 800
+python parse_all_recipes.py --equip SMDI06 --batch-size 800
 ```
 
 두 개 장비를 동시에 지정할 때는 `--equip SMDI01 --equip SMDI02`를 사용한다.

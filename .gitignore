@@ -8,6 +8,7 @@ venv/
 .idea/
 .pytest_cache/
 .coverage
+docs/
 htmlcov/
 build/
 dist/

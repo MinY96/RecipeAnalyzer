@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from src import create_collector, create_recipe_parser
+from src.workers.matching import MatchingAggregator
 from src.databases import close_pools
 
 
@@ -19,10 +20,9 @@ def main() -> None:
     try:
         collector = create_collector()
         parser = create_recipe_parser()
-        # Each equipment failure is isolated by Collector and RecipeParser.
-        # Parser always runs even if the previous collecting pass failed.
         collector.run()
         parser.run()
+        MatchingAggregator.run()
     finally:
         close_pools()
 

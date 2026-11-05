@@ -43,6 +43,8 @@ class PumaParser(Parser):
         for ch in self.as_list(ait):
             channel = str(int(self.leaf(ch.get("channelID"), -1)) + 1)
             details = ch["REGION_PARAM_INFO"]
+            if isinstance(details, list):
+                details = details[0]
             keys = {
                 "edge_factor": self.leaf(ch.get("EdgeDieFactor")),
                 "filter": self.leaf(ch.get("PostFilter")),

@@ -33,21 +33,29 @@ class KLA2365Parser(Parser):
         params["filter"] = (
             str(filter_setting).strip() or None if filter_setting is not None else None
         )
-        sat = sensitivity["ALGORITHM_DATA"]["brightFieldLeafAlgorithmParameters"][
+        region = sensitivity["ALGORITHM_DATA"]["brightFieldLeafAlgorithmParameters"][
             "region"
-        ]["algorithm"]["sat"]
+        ]
+        if isinstance(region, list):
+            sat = region[0]["algorithm"]["sat"]
+        else:
+            sat = region["algorithm"]["sat"]
         break_points = self.leaf(sat["frontEnd"].get("meanBreakPoints"), "")
         mode = "AUTO" if not str(break_points).strip() else "SAT"
         params["mode"] = mode
         primary = sat["threshold"]["primaryDie"]
         if mode == "AUTO":
-            params["threshold"] = self.leaf(primary.get("offsetThresholds"))
+            threshold = self.leaf(primary.get("offsetThresholds"))
+            threshold = threshold.split(" ")[0]
+            params["threshold"] = threshold
         else:
             mappings = (
                 ("maxThresholds", "th_max_s"),
                 ("offsetThresholds", "th_offset_s"),
                 ("targetDensities", "density_target_s"),
             )
+            for i, seg in enumerate(map(int, break_points.split(" ", 3))):
+                params[f"segementation_{i+1}"] = seg
             for key, prefix in mappings:
                 for index, value in enumerate(self.four(self.leaf(primary.get(key)))):
                     params[f"{prefix}{index}"] = value
